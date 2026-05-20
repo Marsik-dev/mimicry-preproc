@@ -26,11 +26,8 @@ class Stabilizer:
         return [self._warp_to_reference(f, ref_img) for f in faces]
 
     def _get_reference(self, faces: list[FaceRegion]) -> np.ndarray:
-        if self.config.reference_frame == "first":
-            img = faces[0].aligned or faces[0].frame.image
-        else:
-            mid = len(faces) // 2
-            img = faces[mid].aligned or faces[mid].frame.image
+        f = faces[0] if self.config.reference_frame == "first" else faces[len(faces) // 2]
+        img = f.aligned if f.aligned is not None else f.frame.image
         return img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     def _warp_to_reference(self, face: FaceRegion, ref_gray: np.ndarray) -> FaceRegion:

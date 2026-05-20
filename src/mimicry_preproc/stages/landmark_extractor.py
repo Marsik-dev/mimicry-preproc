@@ -1,16 +1,18 @@
 """
-Landmark extraction with MediaPipe → 300W 68-point mapping.
+Landmark extraction with MediaPipe Tasks → 300W 68-point mapping.
 
-MediaPipe Face Mesh produces 468 landmarks. We map a canonical subset
-to the 68-point 300W convention so that all downstream geometric
-feature computations use stable, documented indices.
+MediaPipe FaceLandmarker (Tasks API, ≥0.10) produces 478 landmarks.
+We map a canonical subset to the 68-point 300W convention so that all
+downstream geometric feature computations use stable, documented indices.
 
-Index mapping source: mediapipe/python/solutions/face_mesh_connections.py
-and 300W landmark definitions (https://ibug.doc.ic.ac.uk/resources/300-W/).
+Index mapping source:
+  - MediaPipe face_landmarker landmark indices
+  - 300W landmark definitions (https://ibug.doc.ic.ac.uk/resources/300-W/)
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 import cv2
@@ -18,9 +20,10 @@ import numpy as np
 
 from ..types import FaceRegion, Landmarks
 
+_DEFAULT_MODEL = Path(__file__).parent.parent.parent.parent / "models" / "face_landmarker.task"
+
 # fmt: off
-# MediaPipe index → 300W index (0-based).
-# Each entry: MP_idx → 300W position in the 68-point set.
+# MediaPipe FaceLandmarker index → 300W index (0-based).
 MP_TO_300W: dict[int, int] = {
     # Jawline (0–16)
     127: 0,  234: 1,  93: 2,   132: 3,  58: 4,   172: 5,
@@ -47,32 +50,40 @@ MP_TO_300W: dict[int, int] = {
 }
 # fmt: on
 
-# Inverse: 300W index → MediaPipe index
 W300_TO_MP: dict[int, int] = {v: k for k, v in MP_TO_300W.items()}
 
 
 @dataclass
 class LandmarkExtractorConfig:
     backend: Literal["mediapipe"] = "mediapipe"
-    refine: bool = True
     min_confidence: float = 0.5
+    model_path: str | None = None
 
 
 class LandmarkExtractor:
     def __init__(self, config: LandmarkExtractorConfig | None = None) -> None:
         self.config = config or LandmarkExtractorConfig()
-        self._mesh = None
+        self._landmarker = None
         self._init()
 
     def _init(self) -> None:
         import mediapipe as mp
-        self._mesh = mp.solutions.face_mesh.FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
-            refine_landmarks=self.config.refine,
-            min_detection_confidence=self.config.min_confidence,
+        BaseOptions = mp.tasks.BaseOptions
+        FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
+        RunningMode = mp.tasks.vision.RunningMode
+
+        model_path = self.config.model_path or str(_DEFAULT_MODEL)
+        options = FaceLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=model_path),
+            running_mode=RunningMode.IMAGE,
+            num_faces=1,
+            min_face_detection_confidence=self.config.min_confidence,
+            min_face_presence_confidence=self.config.min_confidence,
             min_tracking_confidence=self.config.min_confidence,
+            output_face_blendshapes=False,
+            output_facial_transformation_matrixes=False,
         )
+        self._landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(options)
 
     def extract(self, face: FaceRegion) -> Landmarks | None:
         img = face.aligned if face.aligned is not None else face.frame.image
@@ -81,14 +92,14 @@ class LandmarkExtractor:
         else:
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        results = self._mesh.process(img_rgb)
-        if not results.multi_face_landmarks:
+        import mediapipe as mp
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+        result = self._landmarker.detect(mp_image)
+
+        if not result.face_landmarks:
             return None
 
-        mp_lm = results.multi_face_landmarks[0].landmark
-        h, w = img_rgb.shape[:2]
-
-        # Build 68-point array using the canonical MP→300W mapping
+        mp_lm = result.face_landmarks[0]
         points = np.zeros((68, 2), dtype=np.float32)
         visibility = np.zeros(68, dtype=np.float32)
 
@@ -96,22 +107,24 @@ class LandmarkExtractor:
             mp_idx = W300_TO_MP.get(w300_idx)
             if mp_idx is not None and mp_idx < len(mp_lm):
                 lm = mp_lm[mp_idx]
-                points[w300_idx] = [lm.x, lm.y]   # normalized [0, 1]
+                points[w300_idx] = [lm.x, lm.y]
                 visibility[w300_idx] = max(0.0, 1.0 - abs(lm.z))
 
         return Landmarks(points=points, face_region=face, visibility=visibility)
 
     def extract_sequence(self, faces: list[FaceRegion]) -> list[Landmarks]:
-        results = []
-        for f in faces:
-            lm = self.extract(f)
-            if lm is not None:
-                results.append(lm)
-        return results
+        return [lm for f in faces if (lm := self.extract(f)) is not None]
 
     def close(self) -> None:
-        if self._mesh:
-            self._mesh.close()
+        if self._landmarker:
+            try:
+                self._landmarker.close()
+            except Exception:
+                pass
+            self._landmarker = None
 
     def __del__(self) -> None:
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
