@@ -9,3 +9,4 @@ build/
 *.egg-info/
 .venv/
 venv/
+# models/*.tflite and *.task are committed intentionally (needed for pipeline)

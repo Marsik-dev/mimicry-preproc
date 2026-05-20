@@ -77,6 +77,10 @@ class Pipeline:
     def run_with_debug(self, video_path: str | Path) -> StageOutput:
         return self._run_internal(video_path)
 
+    def run_with_debug_from_frames(self, frames_bgr: list[np.ndarray], fps: float = 25.0) -> StageOutput:
+        frames = self._video_reader.read_from_array(frames_bgr, fps)
+        return self._process_frames(frames)
+
     def run_from_frames(self, frames_bgr: list[np.ndarray], fps: float = 25.0) -> FeatureVector:
         frames = self._video_reader.read_from_array(frames_bgr, fps)
         return self._process_frames(frames).feature_vector  # type: ignore[return-value]
