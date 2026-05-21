@@ -20,7 +20,7 @@ import numpy as np
 
 from ..types import FaceRegion, Landmarks
 
-_DEFAULT_MODEL = Path(__file__).parent.parent.parent.parent / "models" / "face_landmarker.task"
+_DEFAULT_MODEL = Path(__file__).parent.parent / "models" / "face_landmarker.task"
 
 # fmt: off
 # MediaPipe FaceLandmarker index → 300W index (0-based).

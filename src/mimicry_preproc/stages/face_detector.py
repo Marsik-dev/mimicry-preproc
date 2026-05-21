@@ -9,7 +9,7 @@ import numpy as np
 
 from ..types import FaceRegion, Frame
 
-_DEFAULT_MODEL = Path(__file__).parent.parent.parent.parent / "models" / "face_detector.tflite"
+_DEFAULT_MODEL = Path(__file__).parent.parent / "models" / "face_detector.tflite"
 
 
 @dataclass
